@@ -14,6 +14,7 @@ final class AVAudioEnginePlayer: AudioEngine {
     private var gainNode = AVAudioMixerNode()
     private var currentFramePosition: AVAudioFramePosition = 0
     private var effectiveOutputVolume: Float = 1
+    private var suppressedCompletionCallbacks = 0
 
     var statePublisher: AnyPublisher<PlaybackState, Never> {
         stateSubject.eraseToAnyPublisher()
@@ -29,6 +30,7 @@ final class AVAudioEnginePlayer: AudioEngine {
 
     func load(track: Track) async throws {
         stopProgressTimer()
+        stopAndSuppressCompletion()
         state.status = .loading
         state.currentTrack = track
         publish()
@@ -67,9 +69,10 @@ final class AVAudioEnginePlayer: AudioEngine {
     func seek(to seconds: Double) {
         guard audioFile != nil else { return }
         let wasPlaying = state.status == .playing
-        playerNode.stop()
-        scheduleFile(fromSeconds: seconds)
-        state.position = seconds
+        let target = max(0, min(seconds, state.duration))
+        stopAndSuppressCompletion()
+        scheduleFile(fromSeconds: target)
+        state.position = target
         publish()
         if wasPlaying {
             playerNode.play()
@@ -107,6 +110,10 @@ final class AVAudioEnginePlayer: AudioEngine {
             at: nil,
             completionHandler: { [weak self] in
                 Task { @MainActor [weak self] in
+                    if let self, self.suppressedCompletionCallbacks > 0 {
+                        self.suppressedCompletionCallbacks -= 1
+                        return
+                    }
                     self?.state.status = .stopped
                     self?.state.position = self?.state.duration ?? 0
                     self?.publish()
@@ -114,6 +121,11 @@ final class AVAudioEnginePlayer: AudioEngine {
                 }
             }
         )
+    }
+
+    private func stopAndSuppressCompletion() {
+        suppressedCompletionCallbacks += 1
+        playerNode.stop()
     }
 
     private func applyReplayGain() {

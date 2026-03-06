@@ -84,6 +84,41 @@ final class MainViewModelQueueTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(vm.queueTrackIDs, [t3.id, t2.id])
     }
+
+    func testSpaceKeyPlaysSelectedTrackWhenDifferentFromCurrent() async {
+        let t1 = makeTrack(UUID(), title: "t1", no: 1)
+        let t2 = makeTrack(UUID(), title: "t2", no: 2)
+
+        let suiteName = "test.space.selected.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let vm = MainViewModel(
+            libraryService: FakeLibraryService(tracks: [t1, t2]),
+            playlistService: FakePlaylistService(),
+            historyService: FakeHistoryService(),
+            audioEngine: FakeAudioEngine(),
+            nowPlayingController: NowPlayingController(),
+            defaults: defaults,
+            enableRemoteCommands: false
+        )
+
+        await Task.yield()
+
+        vm.selectedTrackID = t1.id
+        vm.playSelected()
+        for _ in 0..<8 { await Task.yield() }
+        XCTAssertEqual(vm.playbackState.currentTrack?.id, t1.id)
+        XCTAssertEqual(vm.playbackState.status, .playing)
+
+        vm.selectedTrackID = t2.id
+        XCTAssertEqual(vm.selectedTrack?.id, t2.id)
+        vm.handleSpaceKeyToggle()
+        for _ in 0..<8 { await Task.yield() }
+        XCTAssertEqual(vm.playbackState.currentTrack?.id, t2.id)
+        XCTAssertEqual(vm.playbackState.status, .playing)
+        XCTAssertEqual(vm.queueTrackIDs, [t1.id])
+    }
 }
 
 @MainActor

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TransportBarView: View {
     @ObservedObject var viewModel: MainViewModel
+    @State private var isScrubbing = false
+    @State private var scrubPosition: Double = 0
 
     var body: some View {
         VStack(spacing: 8) {
@@ -17,12 +19,15 @@ struct TransportBarView: View {
                 Button(action: viewModel.playPrevious) {
                     Image(systemName: "backward.fill")
                 }
+                .buttonStyle(.bordered)
                 Button(action: viewModel.togglePlayPause) {
                     Image(systemName: viewModel.playbackState.status == .playing ? "pause.fill" : "play.fill")
                 }
+                .buttonStyle(.borderedProminent)
                 Button(action: viewModel.playNext) {
                     Image(systemName: "forward.fill")
                 }
+                .buttonStyle(.bordered)
                 .padding(.leading, 4)
 
                 Slider(
@@ -36,14 +41,25 @@ struct TransportBarView: View {
             }
 
             HStack {
-                Text(formatTime(viewModel.playbackState.position))
+                Text(formatTime(currentSliderPosition))
                     .font(.caption)
                 Slider(
                     value: Binding(
-                        get: { min(viewModel.playbackState.position, viewModel.playbackState.duration) },
-                        set: { viewModel.seek($0) }
+                        get: { currentSliderPosition },
+                        set: { scrubPosition = $0 }
                     ),
-                    in: 0...max(viewModel.playbackState.duration, 1)
+                    in: 0...max(viewModel.playbackState.duration, 1),
+                    onEditingChanged: { editing in
+                        if editing {
+                            isScrubbing = true
+                            scrubPosition = min(viewModel.playbackState.position, viewModel.playbackState.duration)
+                        } else {
+                            let target = min(max(0, scrubPosition), viewModel.playbackState.duration)
+                            scrubPosition = target
+                            viewModel.seek(target)
+                            isScrubbing = false
+                        }
+                    }
                 )
                 Text(formatTime(viewModel.playbackState.duration))
                     .font(.caption)
@@ -87,6 +103,26 @@ struct TransportBarView: View {
             }
         }
         .padding(12)
+        .techCard()
+        .animation(AppTheme.Motion.quick, value: viewModel.playbackState.status)
+        .onAppear {
+            scrubPosition = min(viewModel.playbackState.position, viewModel.playbackState.duration)
+        }
+        .onChange(of: viewModel.playbackState.position) { newValue in
+            if !isScrubbing {
+                scrubPosition = min(newValue, viewModel.playbackState.duration)
+            }
+        }
+        .onChange(of: viewModel.playbackState.duration) { newValue in
+            if !isScrubbing {
+                scrubPosition = min(viewModel.playbackState.position, newValue)
+            }
+        }
+    }
+
+    private var currentSliderPosition: Double {
+        if isScrubbing { return scrubPosition }
+        return min(viewModel.playbackState.position, viewModel.playbackState.duration)
     }
 
     private var queuePopover: some View {
@@ -158,6 +194,10 @@ struct TransportBarView: View {
             }
         }
         .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .fill(AppTheme.ColorToken.cardFill.opacity(0.5))
+        )
         .frame(width: 420)
     }
 

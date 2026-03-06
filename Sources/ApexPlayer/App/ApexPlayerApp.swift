@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ApexPlayerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var container = AppContainer()
 
     var body: some Scene {

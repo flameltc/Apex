@@ -1,11 +1,14 @@
+import AppKit
 import SwiftUI
 
 struct MainView: View {
     @StateObject var viewModel: MainViewModel
+    @State private var keyboardShortcutController = KeyboardShortcutController()
     @State private var newPlaylistName = ""
     @State private var renamingPlaylist: Playlist?
     @State private var renameText = ""
     @State private var deletePlaylist: Playlist?
+    @State private var didSetupShortcuts = false
 
     var body: some View {
         NavigationSplitView {
@@ -13,11 +16,34 @@ struct MainView: View {
         } detail: {
             VStack(spacing: 0) {
                 topBar
-                Divider()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
                 detailContent
-                Divider()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .animation(AppTheme.Motion.normal, value: viewModel.selectedSection)
+                    .animation(AppTheme.Motion.normal, value: viewModel.selectedPlaylist?.id)
                 TransportBarView(viewModel: viewModel)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+        }
+        .preferredColorScheme(viewModel.themeMode == .dark ? .dark : .light)
+        .animation(AppTheme.Motion.quick, value: viewModel.playbackState.status)
+        .onAppear {
+            NSApp.activate(ignoringOtherApps: true)
+            if !didSetupShortcuts {
+                keyboardShortcutController.start {
+                    viewModel.handleSpaceKeyToggle()
+                }
+                didSetupShortcuts = true
+            }
+        }
+        .onDisappear {
+            keyboardShortcutController.stop()
+            didSetupShortcuts = false
         }
         .alert("错误", isPresented: Binding(
             get: { viewModel.currentError != nil },
@@ -97,6 +123,7 @@ struct MainView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .navigationSplitViewColumnWidth(min: 220, ideal: 260)
     }
 
@@ -153,6 +180,7 @@ struct MainView: View {
             }
         }
         .padding(12)
+        .techCard()
     }
 
     @ViewBuilder
@@ -203,6 +231,8 @@ struct MainView: View {
             }
             .onMove(perform: viewModel.movePlaylistTrack)
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var emptyState: some View {
@@ -239,6 +269,8 @@ struct MainView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.white.opacity(0.01))
             .contextMenu {
                 Button("播放") { viewModel.playSelected() }
                 if viewModel.selectedPlaylist != nil {
@@ -249,6 +281,7 @@ struct MainView: View {
                 viewModel.playSelected()
             }
         }
+        .techCard()
     }
 
     private var recentTable: some View {
@@ -274,6 +307,8 @@ struct MainView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var artistTable: some View {
@@ -290,6 +325,8 @@ struct MainView: View {
             }
             .buttonStyle(.plain)
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var albumTable: some View {
@@ -311,6 +348,8 @@ struct MainView: View {
             }
             .buttonStyle(.plain)
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var artistTrackTable: some View {
@@ -345,6 +384,8 @@ struct MainView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var albumTrackTable: some View {
@@ -379,10 +420,22 @@ struct MainView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .techCard()
     }
 
     private var settingsView: some View {
         Form {
+            Picker("主题", selection: Binding(
+                get: { viewModel.themeMode },
+                set: { viewModel.setThemeMode($0) }
+            )) {
+                ForEach(MainViewModel.ThemeMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             Toggle("启用 ReplayGain", isOn: Binding(
                 get: { viewModel.isReplayingGainEnabled },
                 set: { viewModel.setReplayGainEnabled($0) }
@@ -401,6 +454,7 @@ struct MainView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(16)
+        .techCard()
     }
 
     private func icon(for section: LibrarySection) -> String {

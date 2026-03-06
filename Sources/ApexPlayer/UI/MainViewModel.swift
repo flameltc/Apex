@@ -4,6 +4,13 @@ import Foundation
 
 @MainActor
 final class MainViewModel: ObservableObject {
+    enum ThemeMode: String, CaseIterable, Identifiable {
+        case light = "浅色"
+        case dark = "深色"
+
+        var id: String { rawValue }
+    }
+
     enum SidebarSelection: Hashable {
         case section(LibrarySection)
         case playlist(UUID)
@@ -53,6 +60,7 @@ final class MainViewModel: ObservableObject {
     @Published var favorites: Set<UUID> = []
     @Published var isReplayingGainEnabled = true
     @Published var fadeDurationMs: Double = 250
+    @Published var themeMode: ThemeMode = .dark
     @Published var playbackMode: PlaybackMode = .sequence
     @Published var isQueuePresented = false
     @Published var queueTrackIDs: [UUID] = []
@@ -74,6 +82,7 @@ final class MainViewModel: ObservableObject {
     private enum SettingsKey {
         static let replayGainEnabled = "settings.replayGainEnabled"
         static let fadeDurationMs = "settings.fadeDurationMs"
+        static let themeMode = "settings.themeMode"
         static let playbackMode = "playback.mode"
         static let lastTrackID = "playback.lastTrackID"
         static let lastPosition = "playback.lastPosition"
@@ -452,6 +461,16 @@ final class MainViewModel: ObservableObject {
         }
     }
 
+    func handleSpaceKeyToggle() {
+        if let selected = selectedTrack,
+           selected.id != playbackState.currentTrack?.id {
+            rebuildQueue(forCurrentTrackID: selected.id)
+            startPlayback(selected)
+            return
+        }
+        togglePlayPause()
+    }
+
     func playNext() {
         guard !filteredTracks.isEmpty else { return }
         playNextInternal(manual: true)
@@ -471,7 +490,9 @@ final class MainViewModel: ObservableObject {
     }
 
     func seek(_ value: Double) {
-        audioEngine.seek(to: value)
+        let duration = playbackState.duration
+        let clamped = min(max(0, value), duration > 0 ? duration : value)
+        audioEngine.seek(to: clamped)
     }
 
     func setReplayGainEnabled(_ enabled: Bool) {
@@ -484,6 +505,11 @@ final class MainViewModel: ObservableObject {
         fadeDurationMs = ms
         defaults.set(ms, forKey: SettingsKey.fadeDurationMs)
         audioEngine.setFade(duration: ms / 1000)
+    }
+
+    func setThemeMode(_ mode: ThemeMode) {
+        themeMode = mode
+        defaults.set(mode.rawValue, forKey: SettingsKey.themeMode)
     }
 
     func setPlaybackMode(_ mode: PlaybackMode) {
@@ -592,6 +618,10 @@ final class MainViewModel: ObservableObject {
         }
         if defaults.object(forKey: SettingsKey.fadeDurationMs) != nil {
             fadeDurationMs = defaults.double(forKey: SettingsKey.fadeDurationMs)
+        }
+        if let rawTheme = defaults.string(forKey: SettingsKey.themeMode),
+           let mode = ThemeMode(rawValue: rawTheme) {
+            themeMode = mode
         }
         if let raw = defaults.string(forKey: SettingsKey.playbackMode),
            let mode = PlaybackMode(rawValue: raw) {
