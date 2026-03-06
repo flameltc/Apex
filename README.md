@@ -1,5 +1,7 @@
 # ApexPlayer
 
+English | [简体中文](README.zh-CN.md)
+
 A local macOS music player built with SwiftUI + AVFoundation.
 
 ## Features
