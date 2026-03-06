@@ -119,6 +119,33 @@ final class MainViewModelQueueTests: XCTestCase {
         XCTAssertEqual(vm.playbackState.status, .playing)
         XCTAssertEqual(vm.queueTrackIDs, [t1.id])
     }
+
+    func testSeekClampsAndSendsSingleCall() async {
+        let t1 = makeTrack(UUID(), title: "t1", no: 1)
+        let suiteName = "test.seek.clamp.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let audioEngine = FakeAudioEngine()
+        let vm = MainViewModel(
+            libraryService: FakeLibraryService(tracks: [t1]),
+            playlistService: FakePlaylistService(),
+            historyService: FakeHistoryService(),
+            audioEngine: audioEngine,
+            nowPlayingController: NowPlayingController(),
+            defaults: defaults,
+            enableRemoteCommands: false
+        )
+
+        await Task.yield()
+        vm.selectedTrackID = t1.id
+        vm.playSelected()
+        for _ in 0..<8 { await Task.yield() }
+
+        vm.seek(999)
+        XCTAssertEqual(audioEngine.seekCalls.count, 1)
+        XCTAssertEqual(audioEngine.seekCalls.first ?? -1, t1.duration, accuracy: 0.001)
+    }
 }
 
 @MainActor
@@ -172,6 +199,7 @@ private final class FakeHistoryService: HistoryService {
 private final class FakeAudioEngine: AudioEngine {
     private let subject = CurrentValueSubject<PlaybackState, Never>(PlaybackState())
     private var currentState = PlaybackState()
+    private(set) var seekCalls: [Double] = []
 
     func load(track: Track) async throws {
         currentState.currentTrack = track
@@ -191,6 +219,7 @@ private final class FakeAudioEngine: AudioEngine {
     }
 
     func seek(to seconds: Double) {
+        seekCalls.append(seconds)
         currentState.position = seconds
         subject.send(currentState)
     }

@@ -14,7 +14,7 @@ final class AVAudioEnginePlayer: AudioEngine {
     private var gainNode = AVAudioMixerNode()
     private var currentFramePosition: AVAudioFramePosition = 0
     private var effectiveOutputVolume: Float = 1
-    private var suppressedCompletionCallbacks = 0
+    private var playbackGeneration: UInt64 = 0
 
     var statePublisher: AnyPublisher<PlaybackState, Never> {
         stateSubject.eraseToAnyPublisher()
@@ -30,7 +30,7 @@ final class AVAudioEnginePlayer: AudioEngine {
 
     func load(track: Track) async throws {
         stopProgressTimer()
-        stopAndSuppressCompletion()
+        let generation = restartPlaybackSchedule()
         state.status = .loading
         state.currentTrack = track
         publish()
@@ -39,7 +39,7 @@ final class AVAudioEnginePlayer: AudioEngine {
         audioFile = file
         currentFramePosition = 0
         state.duration = track.duration
-        scheduleFile(fromSeconds: 0)
+        scheduleFile(fromSeconds: 0, generation: generation)
         applyReplayGain()
 
         state.status = .paused
@@ -70,8 +70,8 @@ final class AVAudioEnginePlayer: AudioEngine {
         guard audioFile != nil else { return }
         let wasPlaying = state.status == .playing
         let target = max(0, min(seconds, state.duration))
-        stopAndSuppressCompletion()
-        scheduleFile(fromSeconds: target)
+        let generation = restartPlaybackSchedule()
+        scheduleFile(fromSeconds: target, generation: generation)
         state.position = target
         publish()
         if wasPlaying {
@@ -96,7 +96,7 @@ final class AVAudioEnginePlayer: AudioEngine {
         publish()
     }
 
-    private func scheduleFile(fromSeconds seconds: Double) {
+    private func scheduleFile(fromSeconds seconds: Double, generation: UInt64) {
         guard let file = audioFile else { return }
         let sampleRate = file.processingFormat.sampleRate
         let startFrame = AVAudioFramePosition(max(0, seconds) * sampleRate)
@@ -110,22 +110,23 @@ final class AVAudioEnginePlayer: AudioEngine {
             at: nil,
             completionHandler: { [weak self] in
                 Task { @MainActor [weak self] in
-                    if let self, self.suppressedCompletionCallbacks > 0 {
-                        self.suppressedCompletionCallbacks -= 1
+                    guard let self else { return }
+                    guard generation == self.playbackGeneration else {
                         return
                     }
-                    self?.state.status = .stopped
-                    self?.state.position = self?.state.duration ?? 0
-                    self?.publish()
-                    self?.stopProgressTimer()
+                    self.state.status = .stopped
+                    self.state.position = self.state.duration
+                    self.publish()
+                    self.stopProgressTimer()
                 }
             }
         )
     }
 
-    private func stopAndSuppressCompletion() {
-        suppressedCompletionCallbacks += 1
+    private func restartPlaybackSchedule() -> UInt64 {
+        playbackGeneration &+= 1
         playerNode.stop()
+        return playbackGeneration
     }
 
     private func applyReplayGain() {

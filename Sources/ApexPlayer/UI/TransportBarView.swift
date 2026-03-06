@@ -56,8 +56,8 @@ struct TransportBarView: View {
                         } else {
                             let target = min(max(0, scrubPosition), viewModel.playbackState.duration)
                             scrubPosition = target
-                            viewModel.seek(target)
                             isScrubbing = false
+                            viewModel.seek(target)
                         }
                     }
                 )
