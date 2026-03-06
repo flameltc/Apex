@@ -36,6 +36,7 @@ final class LibraryServiceImpl: LibraryService {
         sourcesSubject.send(sources)
         updateWatcherPaths(sources)
 
+        operationStatusSubject.send(LibraryOperationStatus(isRunning: true, message: "正在扫描目录...", progress: nil))
         let tracks = await scanner.scan(url: source.url) { [weak self] done, total, fileURL in
             self?.publishProgress(prefix: "正在扫描目录", done: done, total: total, current: fileURL.lastPathComponent)
         }
@@ -47,6 +48,7 @@ final class LibraryServiceImpl: LibraryService {
     func rescanAll() async {
         let sources = sourcesSubject.value
         let urls = sources.map(\.url)
+        operationStatusSubject.send(LibraryOperationStatus(isRunning: true, message: "正在重扫曲库...", progress: nil))
         let tracks = await scanner.scan(urls: urls) { [weak self] done, total, fileURL in
             self?.publishProgress(prefix: "正在重扫曲库", done: done, total: total, current: fileURL.lastPathComponent)
         }
@@ -57,6 +59,7 @@ final class LibraryServiceImpl: LibraryService {
     }
 
     func importFiles(_ urls: [URL]) async {
+        operationStatusSubject.send(LibraryOperationStatus(isRunning: true, message: "正在导入文件...", progress: nil))
         let tracks = await scanner.scan(urls: urls) { [weak self] done, total, fileURL in
             self?.publishProgress(prefix: "正在导入文件", done: done, total: total, current: fileURL.lastPathComponent)
         }

@@ -103,8 +103,20 @@ struct MainView: View {
     private var topBar: some View {
         VStack(spacing: 6) {
             HStack {
+                if viewModel.isArtistDrillDown {
+                    Button("返回") { viewModel.backFromArtist() }
+                } else if viewModel.isAlbumDrillDown {
+                    Button("返回") { viewModel.backFromAlbum() }
+                }
                 Text(viewModel.detailTitle)
                     .font(.headline)
+                if viewModel.isArtistDrillDown {
+                    Text("· \(viewModel.artistDetailTitle)")
+                        .foregroundStyle(.secondary)
+                } else if viewModel.isAlbumDrillDown {
+                    Text("· \(viewModel.albumDetailTitle)")
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if viewModel.selectedSection != .settings {
                     TextField("搜索标题/艺术家/专辑", text: $viewModel.searchText)
@@ -152,9 +164,17 @@ struct MainView: View {
         } else if viewModel.selectedSection == .recentlyPlayed {
             recentTable
         } else if viewModel.selectedSection == .artists {
-            artistTable
+            if viewModel.isArtistDrillDown {
+                artistTrackTable
+            } else {
+                artistTable
+            }
         } else if viewModel.selectedSection == .albums {
-            albumTable
+            if viewModel.isAlbumDrillDown {
+                albumTrackTable
+            } else {
+                albumTable
+            }
         } else if viewModel.selectedPlaylist != nil {
             playlistList
         } else {
@@ -257,17 +277,107 @@ struct MainView: View {
     }
 
     private var artistTable: some View {
-        Table(viewModel.artistSummaries) {
-            TableColumn("艺术家") { artist in Text(artist.name) }
-            TableColumn("歌曲数") { artist in Text("\(artist.trackCount)") }
+        List(viewModel.artistSummaries) { artist in
+            Button {
+                viewModel.openArtist(artist.name)
+            } label: {
+                HStack {
+                    Text(artist.name)
+                    Spacer()
+                    Text("\(artist.trackCount)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 
     private var albumTable: some View {
-        Table(viewModel.albumSummaries) {
-            TableColumn("专辑") { album in Text(album.title) }
-            TableColumn("艺术家") { album in Text(album.artist) }
-            TableColumn("歌曲数") { album in Text("\(album.trackCount)") }
+        List(viewModel.albumSummaries) { album in
+            Button {
+                viewModel.openAlbum(album.id)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(album.title)
+                        Text(album.artist)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                    Spacer()
+                    Text("\(album.trackCount)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var artistTrackTable: some View {
+        List {
+            ForEach(viewModel.artistTrackGroups) { group in
+                Section(group.title) {
+                    ForEach(group.tracks) { track in
+                        HStack {
+                            Text("\(track.trackNo).")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, alignment: .trailing)
+                            Text(track.title)
+                            Spacer()
+                            Text(formatTime(track.duration))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { viewModel.selectedTrackID = track.id }
+                        .onTapGesture(count: 2) { viewModel.playTrack(track) }
+                        .contextMenu {
+                            Button("播放") { viewModel.playTrack(track) }
+                            Button(viewModel.isFavorite(track.id) ? "取消收藏" : "收藏") {
+                                viewModel.toggleFavorite(track.id)
+                            }
+                            Menu("加入播放列表") {
+                                ForEach(viewModel.playlists) { playlist in
+                                    Button(playlist.name) { viewModel.addTrack(track.id, to: playlist) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var albumTrackTable: some View {
+        List {
+            ForEach(viewModel.albumTrackGroups) { group in
+                Section(group.title) {
+                    ForEach(group.tracks) { track in
+                        HStack {
+                            Text("\(track.trackNo).")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, alignment: .trailing)
+                            Text(track.title)
+                            Spacer()
+                            Text(formatTime(track.duration))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { viewModel.selectedTrackID = track.id }
+                        .onTapGesture(count: 2) { viewModel.playTrack(track) }
+                        .contextMenu {
+                            Button("播放") { viewModel.playTrack(track) }
+                            Button(viewModel.isFavorite(track.id) ? "取消收藏" : "收藏") {
+                                viewModel.toggleFavorite(track.id)
+                            }
+                            Menu("加入播放列表") {
+                                ForEach(viewModel.playlists) { playlist in
+                                    Button(playlist.name) { viewModel.addTrack(track.id, to: playlist) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

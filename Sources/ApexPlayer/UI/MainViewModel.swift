@@ -34,9 +34,17 @@ final class MainViewModel: ObservableObject {
         let trackCount: Int
     }
 
+    struct TrackGroup: Identifiable {
+        let title: String
+        let tracks: [Track]
+        var id: String { title }
+    }
+
     @Published var sidebarSelection: SidebarSelection = .section(.allTracks)
     @Published var selectedTrackID: UUID?
     @Published var selectedPlaylistTrackIDs: Set<UUID> = []
+    @Published var selectedArtistName: String?
+    @Published var selectedAlbumID: String?
     @Published var searchText = ""
     @Published var tracks: [Track] = []
     @Published var importSources: [ImportSource] = []
@@ -46,6 +54,8 @@ final class MainViewModel: ObservableObject {
     @Published var isReplayingGainEnabled = true
     @Published var fadeDurationMs: Double = 250
     @Published var playbackMode: PlaybackMode = .sequence
+    @Published var isQueuePresented = false
+    @Published var queueTrackIDs: [UUID] = []
     @Published var libraryOperationStatus: String?
     @Published var libraryOperationProgress: Double?
     @Published var isLibraryBusy = false
@@ -67,21 +77,43 @@ final class MainViewModel: ObservableObject {
         static let playbackMode = "playback.mode"
         static let lastTrackID = "playback.lastTrackID"
         static let lastPosition = "playback.lastPosition"
+        static let queueTrackIDs = "playback.queueTrackIDs"
     }
 
     private var pendingRestore: (trackID: UUID, position: Double)?
     private var previousPlaybackStatus: PlaybackStatus = .stopped
 
-    init(container: AppContainer, defaults: UserDefaults = .standard) {
-        self.libraryService = container.libraryService
-        self.playlistService = container.playlistService
-        self.historyService = container.historyService
-        self.audioEngine = container.audioEngine
-        self.nowPlayingController = container.nowPlayingController
+    convenience init(container: AppContainer, defaults: UserDefaults = .standard) {
+        self.init(
+            libraryService: container.libraryService,
+            playlistService: container.playlistService,
+            historyService: container.historyService,
+            audioEngine: container.audioEngine,
+            nowPlayingController: container.nowPlayingController,
+            defaults: defaults
+        )
+    }
+
+    init(
+        libraryService: LibraryService,
+        playlistService: PlaylistService,
+        historyService: HistoryService,
+        audioEngine: AudioEngine,
+        nowPlayingController: NowPlayingController,
+        defaults: UserDefaults = .standard,
+        enableRemoteCommands: Bool = true
+    ) {
+        self.libraryService = libraryService
+        self.playlistService = playlistService
+        self.historyService = historyService
+        self.audioEngine = audioEngine
+        self.nowPlayingController = nowPlayingController
         self.defaults = defaults
 
         bind()
-        setupRemoteControl()
+        if enableRemoteCommands {
+            setupRemoteControl()
+        }
         playlists = playlistService.playlists()
         favorites = historyService.favoriteTrackIDs()
         loadSettings()
@@ -161,6 +193,72 @@ final class MainViewModel: ObservableObject {
         return selectedPlaylist?.name ?? "播放列表"
     }
 
+    var queueCurrentTrack: Track? {
+        playbackState.currentTrack
+    }
+
+    var queueUpNextTracks: [Track] {
+        let trackMap = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0) })
+        return queueTrackIDs.compactMap { trackMap[$0] }
+    }
+
+    var isArtistDrillDown: Bool {
+        selectedSection == .artists && selectedArtistName != nil
+    }
+
+    var isAlbumDrillDown: Bool {
+        selectedSection == .albums && selectedAlbumID != nil
+    }
+
+    var artistDetailTracks: [Track] {
+        guard let artist = selectedArtistName else { return [] }
+        return tracks
+            .filter { normalizeArtist($0.artist) == artist }
+            .sorted { lhs, rhs in
+                if lhs.album.caseInsensitiveCompare(rhs.album) == .orderedSame {
+                    return lhs.trackNo < rhs.trackNo
+                }
+                return lhs.album.localizedCaseInsensitiveCompare(rhs.album) == .orderedAscending
+            }
+    }
+
+    var albumDetailTracks: [Track] {
+        guard let albumID = selectedAlbumID else { return [] }
+        return tracks
+            .filter { albumKey(artist: $0.artist, album: $0.album) == albumID }
+            .sorted { lhs, rhs in
+                if lhs.discNo == rhs.discNo { return lhs.trackNo < rhs.trackNo }
+                return lhs.discNo < rhs.discNo
+            }
+    }
+
+    var artistTrackGroups: [TrackGroup] {
+        let grouped = Dictionary(grouping: artistDetailTracks) { normalizeAlbum($0.album) }
+        return grouped.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { key in
+                TrackGroup(title: key, tracks: grouped[key] ?? [])
+            }
+    }
+
+    var albumTrackGroups: [TrackGroup] {
+        let grouped = Dictionary(grouping: albumDetailTracks) { max($0.discNo, 1) }
+        return grouped.keys.sorted().map { discNo in
+            TrackGroup(title: "Disc \(discNo)", tracks: grouped[discNo] ?? [])
+        }
+    }
+
+    var artistDetailTitle: String {
+        selectedArtistName ?? "艺术家"
+    }
+
+    var albumDetailTitle: String {
+        guard let albumID = selectedAlbumID else { return "专辑" }
+        if let summary = albumSummaries.first(where: { $0.id == albumID }) {
+            return "\(summary.artist) · \(summary.title)"
+        }
+        return "专辑"
+    }
+
     func addFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -199,12 +297,36 @@ final class MainViewModel: ObservableObject {
 
     func selectSection(_ section: LibrarySection) {
         sidebarSelection = .section(section)
+        selectedArtistName = nil
+        selectedAlbumID = nil
+    }
+
+    func openArtist(_ artistName: String) {
+        selectedArtistName = artistName
+        selectedAlbumID = nil
+    }
+
+    func backFromArtist() {
+        selectedArtistName = nil
+    }
+
+    func openAlbum(_ albumID: String) {
+        selectedAlbumID = albumID
+        selectedArtistName = nil
+    }
+
+    func backFromAlbum() {
+        selectedAlbumID = nil
     }
 
     func toggleFavorite(_ trackID: UUID) {
         let newValue = !favorites.contains(trackID)
         historyService.markFavorite(trackID: trackID, isFavorite: newValue)
         favorites = historyService.favoriteTrackIDs()
+    }
+
+    func isFavorite(_ trackID: UUID) -> Bool {
+        favorites.contains(trackID)
     }
 
     func createPlaylist(name: String) {
@@ -240,6 +362,14 @@ final class MainViewModel: ObservableObject {
 
     func addSelectedTrack(to playlist: Playlist) {
         guard let trackID = selectedTrackID else { return }
+        do {
+            try playlistService.addTrack(trackID, to: playlist.id)
+        } catch {
+            currentError = "添加到播放列表失败"
+        }
+    }
+
+    func addTrack(_ trackID: UUID, to playlist: Playlist) {
         do {
             try playlistService.addTrack(trackID, to: playlist.id)
         } catch {
@@ -286,6 +416,11 @@ final class MainViewModel: ObservableObject {
 
     func playSelected() {
         guard let track = selectedTrack else { return }
+        rebuildQueue(forCurrentTrackID: track.id)
+        startPlayback(track)
+    }
+
+    private func startPlayback(_ track: Track) {
         Task {
             do {
                 try await audioEngine.load(track: track)
@@ -354,6 +489,41 @@ final class MainViewModel: ObservableObject {
     func setPlaybackMode(_ mode: PlaybackMode) {
         playbackMode = mode
         defaults.set(mode.rawValue, forKey: SettingsKey.playbackMode)
+        if let currentID = playbackState.currentTrack?.id {
+            rebuildQueue(forCurrentTrackID: currentID)
+        }
+    }
+
+    func playFromQueue(_ track: Track) {
+        queueTrackIDs.removeAll { $0 == track.id }
+        persistQueueState()
+        selectedTrackID = track.id
+        startPlayback(track)
+    }
+
+    func moveQueueTrack(from sourceOffsets: IndexSet, to destination: Int) {
+        var reordered = queueTrackIDs
+        let moving = sourceOffsets.sorted().map { reordered[$0] }
+        for index in sourceOffsets.sorted(by: >) {
+            reordered.remove(at: index)
+        }
+        var target = destination
+        for source in sourceOffsets {
+            if source < destination { target -= 1 }
+        }
+        reordered.insert(contentsOf: moving, at: max(0, min(target, reordered.count)))
+        queueTrackIDs = reordered
+        persistQueueState()
+    }
+
+    func removeQueueTrack(_ trackID: UUID) {
+        queueTrackIDs.removeAll { $0 == trackID }
+        persistQueueState()
+    }
+
+    func clearQueue() {
+        queueTrackIDs.removeAll()
+        persistQueueState()
     }
 
     private func bind() {
@@ -435,6 +605,9 @@ final class MainViewModel: ObservableObject {
             let position = defaults.double(forKey: SettingsKey.lastPosition)
             pendingRestore = (trackID: id, position: position)
         }
+        if let rawQueue = defaults.array(forKey: SettingsKey.queueTrackIDs) as? [String] {
+            queueTrackIDs = rawQueue.compactMap(UUID.init(uuidString:))
+        }
     }
 
     private func baseTracksForSelection() -> [Track] {
@@ -462,6 +635,18 @@ final class MainViewModel: ObservableObject {
         tracks.isEmpty && importSources.isEmpty
     }
 
+    private func normalizeArtist(_ value: String) -> String {
+        value.isEmpty ? "Unknown Artist" : value
+    }
+
+    private func normalizeAlbum(_ value: String) -> String {
+        value.isEmpty ? "Unknown Album" : value
+    }
+
+    private func albumKey(artist: String, album: String) -> String {
+        "\(normalizeArtist(artist))-\(normalizeAlbum(album))"
+    }
+
     private func persistLastPlayback(_ state: PlaybackState) {
         guard let track = state.currentTrack else { return }
         switch state.status {
@@ -485,36 +670,58 @@ final class MainViewModel: ObservableObject {
     }
 
     private func playNextInternal(manual: Bool) {
-        guard !filteredTracks.isEmpty else { return }
         if !manual && playbackMode == .repeatOne, let current = playbackState.currentTrack {
-            selectedTrackID = current.id
-            playSelected()
+            startPlayback(current)
             return
         }
-        let list = filteredTracks
-        switch playbackMode {
-        case .sequence, .repeatOne:
-            let currentIndex = list.firstIndex { $0.id == playbackState.currentTrack?.id } ?? -1
-            let next = list[(currentIndex + 1) % list.count]
-            selectedTrackID = next.id
-            playSelected()
-        case .shuffle:
-            if list.count == 1, let only = list.first {
-                selectedTrackID = only.id
-                playSelected()
-                return
-            }
-            let currentID = playbackState.currentTrack?.id
-            let candidates = list.filter { $0.id != currentID }
-            if let random = candidates.randomElement() {
-                selectedTrackID = random.id
-                playSelected()
-            }
+
+        if queueTrackIDs.isEmpty, let currentID = playbackState.currentTrack?.id {
+            rebuildQueue(forCurrentTrackID: currentID)
         }
+
+        guard let nextID = queueTrackIDs.first else { return }
+        queueTrackIDs.removeFirst()
+        guard let nextTrack = tracks.first(where: { $0.id == nextID }) else {
+            playNextInternal(manual: manual)
+            return
+        }
+        selectedTrackID = nextTrack.id
+        startPlayback(nextTrack)
     }
 
     private func handleTrackFinishedIfNeeded(oldStatus: PlaybackStatus, newStatus: PlaybackStatus) {
         guard oldStatus == .playing, newStatus == .stopped else { return }
         playNextInternal(manual: false)
+    }
+
+    private func rebuildQueue(forCurrentTrackID currentID: UUID) {
+        let list = filteredTracks
+        guard !list.isEmpty else {
+            queueTrackIDs = []
+            return
+        }
+        guard let index = list.firstIndex(where: { $0.id == currentID }) else {
+            queueTrackIDs = list.map(\.id)
+            return
+        }
+
+        switch playbackMode {
+        case .sequence, .repeatOne:
+            if list.count == 1 {
+                queueTrackIDs = []
+            } else {
+                let tail = Array(list[(index + 1)...])
+                let head = Array(list[..<index])
+                queueTrackIDs = (tail + head).map(\.id)
+            }
+        case .shuffle:
+            let others = list.enumerated().filter { $0.offset != index }.map(\.element)
+            queueTrackIDs = others.shuffled().map(\.id)
+        }
+        persistQueueState()
+    }
+
+    private func persistQueueState() {
+        defaults.set(queueTrackIDs.map(\.uuidString), forKey: SettingsKey.queueTrackIDs)
     }
 }

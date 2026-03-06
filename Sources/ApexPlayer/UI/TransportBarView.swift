@@ -79,9 +79,86 @@ struct TransportBarView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                Button("队列") { viewModel.isQueuePresented.toggle() }
+                    .popover(isPresented: $viewModel.isQueuePresented) {
+                        queuePopover
+                    }
             }
         }
         .padding(12)
+    }
+
+    private var queuePopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("播放队列")
+                .font(.headline)
+            if let current = viewModel.queueCurrentTrack {
+                HStack {
+                    Text("当前")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(current.title)
+                    Spacer()
+                    Text(current.artist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            if viewModel.queueUpNextTracks.isEmpty {
+                Text("队列为空")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            } else {
+                HStack {
+                    Text("即将播放")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("清空队列") { viewModel.clearQueue() }
+                        .font(.caption)
+                }
+                List {
+                    ForEach(viewModel.queueUpNextTracks.prefix(30), id: \.id) { track in
+                        HStack {
+                            Button {
+                                viewModel.playFromQueue(track)
+                                viewModel.isQueuePresented = false
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(track.title)
+                                        Text(track.artist)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(formatTime(track.duration))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                viewModel.removeQueueTrack(track.id)
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onMove(perform: viewModel.moveQueueTrack)
+                }
+                .frame(height: 260)
+            }
+        }
+        .padding(12)
+        .frame(width: 420)
     }
 
     private func formatTime(_ seconds: Double) -> String {
